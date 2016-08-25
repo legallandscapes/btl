@@ -39,6 +39,9 @@ import sys
 # NLTK used for pre-processing of the text corpus
 sys.path.append("lib/nltk")
 
+# NLTK used for pre-processing of the text corpus
+sys.path.append("lib/lda")
+
 # SortedDict is used for the list of high probability docs (Fix this)
 sys.path.append("lib/sorted_containers");
 
@@ -57,8 +60,6 @@ import logging
 
 logging.basicConfig(format="%(asctime)-15s %(message)s")
 LOG = logging.getLogger("BTL")
-
-
 
 # Ensure that the POS tagging database is available.
 # nltk.download("averaged_perceptron_tagger");
@@ -265,9 +266,7 @@ class BTL_tokenizer:
                 self.do_stem = kwargs.pop("use_stemming", True);
 
 
-
 class BTL_dictionary:
-
         table = {}; # word => id
         ndocs = {}; # id => number of docs it has occurred in
 
@@ -357,7 +356,6 @@ class BTL_dictionary:
 
                 return result;
 
-
         #def filter(self, lt=0, gt=10000, max_size=100000):
         def filter(self, max_size=100000):
                 """Filter out tokens that appear in
@@ -382,38 +380,23 @@ class BTL_dictionary:
 			# Sorts by number of document appearances document
 			ids = sorted(self.table, key=self.ndocs.get);
                         ids = ids[max_size:];
-                	self.remove_ids(ids);
 
-        def remove_ids(self, id_list):
+                        # Get rid of offending ids 
+                        ids = set(ids)
+                        for w, i in self.table.items():
+                                if i in ids:
+                                        del self.table[w];
 
-                id_list = set(id_list)
+                        # Reassign ids
+                        i = 0;
+                        for w in self.table:
+                                self.table[w] = i;
+                                i += 1;
 
-                for w, i in self.table.items():
-                        if i not in id_list:
-                                del self.table[w];
-                                del self.ndocs[i];
-
-                self.reassign_ids();
-
-        def reassign_ids(self):
-                # Rebuild the tables with new ids.
-                j = 0;
-
-                table = {};
-                ndocs = {};
-
-                for w, i in self.table.items():
-                        table[w] = j;
-                        ndocs[j] = self.ndocs[i];
-
-                        j += 1;
-
-                self.table = table;
-                self.ndocs = ndocs;
-
+                        # this is now useless
+                        self.ndocs = {};
 
 class BTL_lda:
-
         model = None;
 
         def __init__(self, dtm, **kwargs):
@@ -472,7 +455,6 @@ class BTL_lda:
 
 
 class BTL_corpus:
-
         dictionary = None;  # Dictionary (token_id => word mapping)
         dtm        = None;  # Document-term matrix ((doc_id, term_id) => count) 
 
@@ -515,73 +497,14 @@ class BTL_corpus:
                         self.dictionary.add_document(doc);
                         print("dictionary size:%d" % (len(self.dictionary)));
 
-                self.dictionary.filter(max_size=20000);
+                self.dictionary.filter(max_size=30000);
 
                 # Build the DTM
-                #self.dtm = scipy.sparse.csr_matrix((len(doc_list), len(self.dictionary)), dtype=numpy.int16);
-                #self.dtm = [ self.dictionary.make_bow(d) for d in doc_list ];
-                #self.dtm = numpy.array(self.dtm);
-                self.dtm = scipy.sparse.csr_matrix([ self.dictionary.make_bow(d) for d in doc_list ]);
+                self.dtm = scipy.sparse.csr_matrix([self.dictionary.make_bow(d) for d in doc_list]);
                 self.dtm.shape = (len(doc_list), len(self.dictionary));
-
-        #def from_list(self, text_list):
-
-                #docs = [];
-                #i    = 0;
-
-                #for t in text_list:
-                        #docs.append(self.tokenizer.tokenize(t));
-
-                        #i += 1;
-                        #if not i % 100:
-                                #print("adding %d" % (i));
-
-                #self.add_documents(docs);
-
-        #def from_directory(self, directory_path):
-
-                #docs = [];
-                #i    = 0;
-
-                #for filename in os.listdir(directory_path): 
-                        #text = open(self.input+"/"+filename).read();
-                        #docs.append(self.tokenizer.tokenize(text));
-
-                        #i += 1;
-                        #if not i % 100:
-                                #print("adding %d" % (i));
-
-                #self.add_documents(docs);
-
-        #def from_database(self, path=None, query=None):
-
-                #docs = [];
-                #i    = 0;
-
-                ## Open a connection to the provided database file
-                #try: 
-                        #conn = sqlite3.connect(path);
-                #except sqlite3.Error as e:
-                        #print "SQLITE3 error: ", e.args[0];
-
-                #conn.text_factory = bytes; # Process non-ASCII characters
-
-                #db = conn.cursor(); 
-                #db.execute(query);
-
-                #for row in db:
-                        #docs.append(self.tokenizer.tokenize(row[0]));
-
-                        #i += 1;
-                        #if not i % 100:
-                                #print("adding %d" % (i));
-
-                #self.add_documents(docs);
 
         def lda(self, **kwargs):
                 return BTL_lda(self.dtm, **kwargs);
-
-
 
 
 def format_theta(theta_topic_row, limit=10):

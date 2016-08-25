@@ -9,14 +9,12 @@ import sys
 import os
 import sqlite3  # SQLite is part of the standard library 
 import numpy    # numpy arrays used to store DTM matrix 
-import btl_corpus
-from btl_similarity import BTL_corpus, BTL_tokenizer, btl_similarity_matrix
-import btl_similarity
+from similarity import BTL_corpus, BTL_tokenizer, btl_similarity_matrix
+import similarity
 import logging
 
 logging.basicConfig(format="%(asctime)-15s %(message)s")
 LOG = logging.getLogger("BTL")
-
 
 def from_list(tokenizer, text_list):
 
@@ -74,15 +72,6 @@ def from_database(tokenizer, path=None, query=None):
 
 
 
-#dic = btl_similarity.unpickle_it("usctest.dic");
-
-#import pprint
-
-#pprint.pprint(dic);
-
-#exit();
-
-
 tokenizer = BTL_tokenizer(
         stop_tokens = ["l","stat","pub"],
 
@@ -94,18 +83,18 @@ tokenizer = BTL_tokenizer(
 
 corpus = from_database(tokenizer, 
         path="/home/legal_landscapes/public_html/beta/usc.db", 
-        query="SELECT text FROM nodes WHERE text != '(Text Unavailable)' LIMIT 10000"
+        query="SELECT text FROM nodes WHERE text != '(Text Unavailable)'"
 );
 
 
 print("[!] Saving corpus...");
-corpus.save(dictionary_path="usctest.dic", dtm_path="usctest.dtm");
+corpus.save(dictionary_path="usc.dictionary", dtm_path="usc.dtm");
 
 print("[!] Running LDA model...");
 model = corpus.lda(num_topics=100, num_passes=10);
 
 print("[!] Saving LDA model theta and phi...");
-model.save(phi_path="usctest.phi", theta_path="usctest.theta");
+model.save(phi_path="usc.phi", theta_path="usc.theta");
 
 import pprint
 
@@ -116,7 +105,7 @@ T_sim = btl_similarity_matrix(model.theta(), M_T=10, M_O=10);
 #pprint.pprint(T_sim);
 
 print("[!] Saving similarity matrix...");
-numpy.savez("tsim.numpytxt", T_sim);
+numpy.savez("usc.tsim", T_sim);
 
 
 

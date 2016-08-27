@@ -1,7 +1,7 @@
 # -*- coding: UTF-8 -*-
 """
-btl_similarity.py
-`````````````````
+similarity.py
+`````````````
 Form a corpus object from a collection of documents presented as
 
 (1) SQLite database, 
@@ -267,134 +267,219 @@ class BTL_tokenizer:
 
 
 class BTL_dictionary:
-        table = {}; # word => id
-        ndocs = {}; # id => number of docs it has occurred in
+        vocabulary = {}; # token => token_id (note this mapping is 1:1)
+        frequency  = {}; # token_id => number of docs token has occurred in
 
-	def __init__(self, word_to_id=None):
-		if word_to_id is not None:
-			self.table = word_to_id;
+	def __init__(self, vocabulary=None):
+		if vocabulary is not None:
+			self.vocabulary = vocabulary;
 
         def __len__(self):
-                return len(self.table);
+                return len(self.vocabulary);
 
         def __iter__(self):
                 return iter(self.keys());
 
         def __getitem__(self, word):
-                return self.table[word]; # will throw if @word not present 
+                return self.vocabulary[word]; 
 
         def keys(self):
-                return list(self.table.values());
+                return list(self.vocabulary.values());
 
-        def add_document(self, token_list):
-                """Add words to the dictionary from a document
-                        
-                The main way to populate the dictionary is through
-                this function, which will add the vocabulary in 
-                @token_list to its own.
+        def save(self, filename):
+                """Save the dictionary as 2-column text
 
                 Args:
-                        @token_list: List of unicode strings
+                        @self    : The dictionary object (automatic) 
+                        @filename: File to save the dictionary to
 
                 Return:
                         Nothing
                 """
+                f = open(filename, "w");
 
-                tokens_seen = {};
+                for tok, tok_id in self.vocabulary.items():
+                        f.write(str(tok) + " " + str(tok_id) + "\n")
 
-                for token in token_list:
-                        if not isinstance(token, unicode):
-                                token = unicode(token, "utf-8");
+                f.close()
 
-                        tokens_seen[token] = True;
-
-                        if token not in self.table:
-                                token_id = len(self);
-
-                                self.table[token] = token_id;
-                                self.ndocs[token_id] = 1;
-                        else:
-                                if token not in tokens_seen:
-                                        self.ndocs[token_id] += 1;
-
-        def make_bow(self, token_list):
-                """Convert a list of tokens into a list of frequencies.
-
-                NOTE:
-                The output array contains one entry for each ID in the 
-                dictionary, and the value of the i-th entry corresponds 
-                to the number of times the word with ID i occurred in 
-                @token_list.
-
-                If a token in @token_list does not occur in this dictionary, 
-                then it will not be included in the bag-of-words output.
+        def load(self, filename):
+                """Load the dictionary from a 2-column text file
 
                 Args:
+                        @self    : The dictionary object (automatic) 
+                        @filename: File to load the dictionary from 
+
+                Return:
+                        Nothing
+                """
+                f = open(filename, "w");
+
+                for line in f:
+                        (tok, tok_id) = line.split();
+
+                        if not isinstance(tok, unicode):
+                                tok = unicode(tok, "utf-8");
+                        
+                        self.vocabulary[tok] = tok_id; 
+
+                f.close();
+
+        def lookup(self, tok_id): 
+                """Lookup a token from a token id.
+
+                Args:
+                        @self  : The dictionary object (automatic) 
+                        @tok_id: ID of the token to look up
+
+                Return:
+                        A unicode string (the token), or None. 
+
+                NOTE:
+                This reverse lookup is reasonably quick and efficient
+                due to dict.values() and dict.keys() returning lists
+                that only reference dict rather than copying the data. 
+
+                Still, if this is used often enough, a reverse lookup
+                table should be added. 
+                """
+                # Get the location of the value @tok_id in the vocabulary.
+                tok_index = self.vocabulary.values().index(tok_id);
+
+                # Return the key corresponding to that same location.
+                return self.vocabulary.keys()[tok_index];
+
+        def grow(self, token_list):
+                """Add tokens to the dictionary from a token list 
+                        
+                Args:
+                        @self      : The dictionary object (automatic) 
+                        @token_list: List of unicode strings
+
+                Return:
+                        Nothing
+
+                NOTE:
+                By convention, the @token_list provided to each call of 
+                .grow() is considered to represent an individual document. 
+                
+                For the purposes of counting token document frequencies, 
+                the dictionary will treat distinct calls to .grow() as
+                distinct documents, even if the values of @token_list are
+                identical, and no new tokens are added to the dictionary.
+                
+                Likewise, if a single document is provided to the dictionary
+                across multiple calls to .grow(), it will not be treated
+                as a single document. 
+
+                Outside of the calculation of token document frequencies,
+                there will be no adverse effect.
+                """
+                # Fast way to remove duplicate tokens.
+                token_list = {}.fromkeys(token_list).keys();
+
+                for tok in token_list:
+                        # Prevent KeyErrors by ensuring tokens are unicode 
+                        if not isinstance(tok, unicode):
+                                tok = unicode(tok, "utf-8");
+
+                        if tok not in self.vocabulary:
+                                tok_id = len(self);
+
+                                self.vocabulary[tok] = tok_id;
+                                self.frequency[tok_id] = 1;
+                        else:
+                                self.frequency[token_id] += 1;
+
+        def bow(self, token_list):
+                """Convert a token list into a bag of words 
+
+                Args:
+                        @self      : The dictionary object (automatic) 
                         @token_list: List of Unicode strings.
                         
                 Return: 
-                        Numpy array of frequencies. 
+                        Numpy array of token frequencies. 
 
+                NOTE 1:
+                The returned array is of the form
+
+                        [f_0, f_1, f_2, ..., f_n],
+
+                where n = len(self) is the number of tokens in the 
+                dictionary, and f_i is the number of times that the
+                token having id 'i' (in the dictionary) occurs in 
+                @token_list.
+
+                NOTE 2:
+                The length of the returned array is equal to the
+                length of the dictionary, even though in practice
+                most values will be 0. 
+
+                NOTE 3:
+                If a token in @token_list does not occur in the 
+                dictionary, then it will not be included in the 
+                bag-of-words output.
                 """
-                frequency = {};
+                count = {};
 
                 for tok in token_list:
                         if not isinstance(tok, unicode):
                                 tok = unicode(tok, "utf-8");
 
-                        if tok in frequency:
-                                frequency[tok] += 1;
+                        if tok in count:
+                                count[tok] += 1;
                         else:
-                                frequency[tok] = 1;
+                                count[tok] = 1;
 
-                result = numpy.zeros(len(self), dtype=numpy.int16);
-                #result = scipy.sparse.csr_matrix((1, len(self)), dtype=numpy.int16);
+                bow = numpy.zeros(len(self), dtype=numpy.int16);
                 
-                for tok in frequency:
-			if tok in self.table:
-                        	result[self.table[tok]] = frequency[tok];
+                for tok in count:
+                        if tok in self.vocabulary:
+                                bow[self.vocabulary[tok]] = count[tok];
 
-                return result;
+                return bow;
 
-        #def filter(self, lt=0, gt=10000, max_size=100000):
-        def filter(self, max_size=100000):
-                """Filter out tokens that appear in
+        def resize(self, num_tokens=100000):
+                """Resize the dictionary to hold only the most frequent tokens.
 
-                1. less than `no_below` documents (absolute number) or
-                2. more than `no_above` documents (fraction of total corpus size, *not*
-                   absolute number).
-                3. after (1) and (2), keep only the first `keep_n` most frequent tokens (or
-                   keep all if `None`).
+                Args:
+                        @self      : The dictionary object (automatic) 
+                        @num_tokens: Maximum number of tokens to keep.
 
-                After the pruning, shrink resulting gaps in word ids.
+                Return:
+                        Nothing
 
-                **Note**: Due to the gap shrinking, the same word may have a different
-                word id before and after the call to this function!
+                NOTE
+                Tokens are sorted by frequency in terms of the number
+                of documents in which they appear (repeated occurrences
+                of tokens in a single document do not contribute to the 
+                frequency).
+
+                After resizing, tokens will be re-keyed, so that a given 
+                token MAY HAVE A DIFFERENT ID before and after calling this
+                function. 
                 """
-
-                #for i in self.word_to_id:
-                        #if lt <= self.documents.get(i, 0) <= gt:
-                                #ids.append(i);
-
-                if max_size is not None and len(self) > max_size:
-			# Sorts by number of document appearances document
-			ids = sorted(self.table, key=self.ndocs.get);
-                        ids = ids[max_size:];
+                if len(self) > num_tokens:
+                        # Sort by number of document appearances 
+                        ids = sorted(self.vocabulary, key=self.frequency.get);
+                        ids = ids[max_num_tokens:];
 
                         # Get rid of offending ids 
                         ids = set(ids)
-                        for w, i in self.table.items():
-                                if i in ids:
-                                        del self.table[w];
+                        for tok, tok_id in self.vocabulary.items():
+                                if tok_id in ids:
+                                        del self.vocabulary[tok];
+                                        del self.frequency[tok_id];
 
                         # Reassign ids
                         i = 0;
-                        for w in self.table:
-                                self.table[w] = i;
+                        for tok in self.vocabulary:
+                                self.vocabulary[tok] = i;
                                 i += 1;
 
-                        # this is now useless
-                        self.ndocs = {};
+                        # This is now useless until we get more fancy.
+                        self.frequency = {};
 
 class BTL_lda:
         model = None;
@@ -494,13 +579,13 @@ class BTL_corpus:
 
                 # Build up the dictionary
                 for doc in doc_list:
-                        self.dictionary.add_document(doc);
+                        self.dictionary.grow(doc);
                         print("dictionary size:%d" % (len(self.dictionary)));
 
-                self.dictionary.filter(max_size=30000);
+                self.dictionary.winnow(max_size=30000);
 
                 # Build the DTM
-                self.dtm = scipy.sparse.csr_matrix([self.dictionary.make_bow(d) for d in doc_list]);
+                self.dtm = scipy.sparse.csr_matrix([self.dictionary.bow(d) for d in doc_list]);
                 self.dtm.shape = (len(doc_list), len(self.dictionary));
 
         def lda(self, **kwargs):

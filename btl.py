@@ -2,110 +2,211 @@
 """
 btl.py
 ``````
+Build all the big matrices
 """
-
 import sys
 
-import os
-import sqlite3  # SQLite is part of the standard library 
+# SortedDict is used for the list of high probability docs (Fix this)
+sys.path.append("lib/sorted_containers");
+
+from sortedcontainers import SortedDict
+
+import sqlite3
 import numpy    # numpy arrays used to store DTM matrix 
-from similarity import BTL_corpus, BTL_tokenizer, btl_similarity_matrix
-import similarity
+import scipy    # sparse arrays etc
+
 import logging
 
 logging.basicConfig(format="%(asctime)-15s %(message)s")
 LOG = logging.getLogger("BTL")
 
-def from_list(tokenizer, text_list):
+import topicmodel
 
-        docs = [];
-        i    = 0;
+###############################################################################
+# Compute the similarity matrix
+###############################################################################
+def similarity_matrix(theta=None, M_T=10, M_O=10):
 
-        for t in text_list:
-                docs.append(tokenizer.tokenize(t));
+        # doc_id => M_T highest-probability topic_ids 
+        DOC_TOPICS = {};
 
-                i += 1;
-                if not i % 100:
-                        print("adding %d" % (i));
+        # topic_id => M_O highest-probability doc_ids 
+        TOPIC_DOCS = {};
 
-        return BTL_corpus(documents=docs);
+        # For each document in the corpus 
+        for doc_id in range(len(theta)): 
 
-def from_directory(tokenizer, directory_path):
+                topics = topicmodel.format_theta(theta[doc_id]);
 
-        docs = [];
-        i    = 0;
+                DOC_TOPICS[doc_id] = [];
 
-        for filename in os.listdir(directory_path): 
-                text = open(filename).read();
-                docs.append(tokenizer.tokenize(text));
+                for i in range(len(topics)):
 
-                i += 1;
-                if not i % 100:
-                        print("adding %d" % (i));
+                        top_id = topics[i][0];
+                        top_pr = topics[i][1];
 
-        return BTL_corpus(documents=docs);
+                        #
+                        # Build the collection of highest-probability
+                        # documents for each topic.
+                        #
+                        if top_id not in TOPIC_DOCS:
+                                TOPIC_DOCS[top_id] = SortedDict();
+                                TOPIC_DOCS[top_id][top_pr] = doc_id;
 
-def from_database(tokenizer, path=None, query=None):
+                        # Don't bother attempting to insert if the probability
+                        # is less than the lowest already in the collection.
+                        elif top_pr >= TOPIC_DOCS[top_id].peekitem(0)[0]:
 
-        docs = [];
-        i    = 0;
+                                if top_pr not in TOPIC_DOCS[top_id]:
+                                        TOPIC_DOCS[top_id][top_pr] = doc_id;
+                                else:
+                                        # If two docs have an equal probability 
+                                        # of expressing the topic, then which 
+                                        # should we favor? We can only choose a 
+                                        # certain number. Ignore for now.
+                                        print("[WARN] Equal probabilities.");
+
+                                if len(TOPIC_DOCS[top_id]) > M_O:
+                                        # Remember, dict is sorted, so this 
+                                        # will only discard the least one.
+                                        TOPIC_DOCS[top_id].popitem(last=False);
+                                        
+                        #
+                        # Build the collection of highest-probability 
+                        # topics for each document.
+                        #
+                        if i < M_O:
+                                DOC_TOPICS[doc_id].append(top_id);
+
+                        LOG.info("1. Arrays [%d/%d][%d/%d]", doc_id, len(theta), i, len(topics));
+
+        #
+        # Build this matrix thing to join docs to "similar" docs
+        #
+        MATRIX = {};
+
+        for doc_id in DOC_TOPICS:
+
+                MATRIX[doc_id] = [];
+
+                for i in range(len(DOC_TOPICS[doc_id])):
+                        topic_id = DOC_TOPICS[doc_id][i];
+
+                        MATRIX[doc_id].append(TOPIC_DOCS[topic_id].values());
+
+                        LOG.info("MATRIX [%d/%d][%d/%d]", doc_id, len(theta), i, len(DOC_TOPICS[doc_id]));
+
+
+        #
+        # Build dictionary to count occurrences. 
+        #
+        W = {};
+
+        for doc_id_A in DOC_TOPICS:
+                W[doc_id_A] = {};
+
+                # Count occurrences of doc_id_B in matrix of doc_id_A 
+                for i in range(len(MATRIX[doc_id_A])):
+                        for j in range(len(MATRIX[doc_id_A][i])):
+
+                                doc_id_B = MATRIX[doc_id_A][i][j];
+
+                                if doc_id_B not in W[doc_id_A]:
+                                        W[doc_id_A][doc_id_B] = 1;
+                                else:
+                                        W[doc_id_A][doc_id_B] += 1;
+
+                                LOG.info("3. W [%d][%d]", doc_id_A, doc_id_B); 
+                
+        #
+        # Build the similarity matrix
+        #
+        T_sim = scipy.sparse.dok_matrix((len(theta), len(theta)), dtype=numpy.float);
+
+        for a in W:
+                total = 0;
+                for b in W[a]:
+                        if W[a][b] > 0:
+                                total += W[a][b];
+                        
+                        LOG.info("4a. T_sim [%d][%d]", a, b); 
+                        
+                for b in W[a]:
+                        if W[a][b] > 0:
+                                T_sim[a,b] = float(W[a][b])/total;
+                
+                        LOG.info("4b. T_sim [%d][%d]", a, b); 
+
+        return T_sim.tocsc();
+
+###############################################################################
+# Compute the citation matrix  
+###############################################################################
+def citation_matrix(db_path, db_query):
 
         # Open a connection to the provided database file
         try: 
-                conn = sqlite3.connect(path);
+                conn = sqlite3.connect(db_path);
         except sqlite3.Error as e:
                 print "SQLITE3 error: ", e.args[0];
 
         conn.text_factory = bytes; # Process non-ASCII characters
 
         db = conn.cursor(); 
-        db.execute(query);
+
+        count = 0;
+
+        # TODO: write up format for database or else factor this out.
+        db.execute("SELECT count(*) from nodes");
 
         for row in db:
-                docs.append(tokenizer.tokenize(row[0]));
+                count = row[0];
 
-                i += 1;
-                if not i % 100:
-                        print("adding %d" % (i));
+        # Create the (sparse) citation matrix 
+        M_cite = scipy.sparse.lil_matrix((count, count), dtype=numpy.int8);
 
-        return BTL_corpus(documents=docs);
+        db.execute(db_query);
 
+        for row in db:
+                M_cite[int(row[0]),int(row[1])] = 1;
 
-
-tokenizer = BTL_tokenizer(
-        stop_tokens = ["l","stat","pub"],
-
-        use_lexical_smoothing = True,        
-        use_stemming          = True,
-        use_pos_tagging       = False,
-);
+        return M_cite.tocsr();
 
 
-corpus = from_database(tokenizer, 
-        path="/home/legal_landscapes/public_html/beta/usc.db", 
-        query="SELECT text FROM nodes WHERE text != '(Text Unavailable)'"
-);
+###############################################################################
+# Compute the weighted transition matrix 
+###############################################################################
+
+def weighted_transition_matrix(M_sim, M_cite, w_sim, w_cite, w_cited_by):
+        # The weighted sum
+        T = (w_sim*M_sim) + (w_cite*M_cite) + (w_cited_by*M_cite.transpose());
+
+        # Fill the diagonal with 0. 
+        # Newer versions of numpy can use T = numpy.fill_diagonal(T, 0);
+        for i in range(T.shape[0]):
+                T[i,i] = 0;
+
+        # Get a list of the sums of values in each row.
+        row_sums = T.sum(axis=1);
+
+        # If a row sums to 0, replace this sum with 1, to prevent 
+        # division by 0 in the next step. The result will still be 
+        # 0 (the correct value) in the normalization.
+        row_sums[row_sums == 0] = 1;
+
+        # Uses numpy broadcasting to act elementwise on @row_sums
+        T = T / row_sums; 
+
+        return T;
 
 
-print("[!] Saving corpus...");
-corpus.save(dictionary_path="usc.dictionary", dtm_path="usc.dtm");
+###############################################################################
+# Compute the distance matrix
+###############################################################################
 
-print("[!] Running LDA model...");
-model = corpus.lda(num_topics=100, num_passes=10);
+#def distance_matrix(T, r):
+ 
 
-print("[!] Saving LDA model theta and phi...");
-model.save(phi_path="usc.phi", theta_path="usc.theta");
-
-import pprint
-
-print("[!] Computing similarity matrix...");
-T_sim = btl_similarity_matrix(model.theta(), M_T=10, M_O=10);
-
-#T_sim = model.get_similarity_matrix(10, 10);
-#pprint.pprint(T_sim);
-
-print("[!] Saving similarity matrix...");
-numpy.savez("usc.tsim", T_sim);
 
 
 

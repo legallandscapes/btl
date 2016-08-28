@@ -286,7 +286,7 @@ class Dictionary:
                 except IOError:
                         LOG.info("Can't save dictionary to "+path+" (couldn't open file)");
                 else:
-                        LOG.info("Saving dictionary ("+len(self)+" tokens) to "+path);
+                        LOG.info("Saving dictionary ("+str(len(self))+" tokens) to "+path);
 
                 for tok, tok_id in self.vocabulary.items():
                         f.write(str(tok) + " " + str(tok_id) + "\n")
@@ -320,7 +320,7 @@ class Dictionary:
                         
                         self.vocabulary[tok] = tok_id; 
 
-                LOG.info("Done (got "+len(self)+" tokens)");
+                LOG.info("Done (got "+str(len(self))+" tokens)");
 
                 f.close();
 
@@ -402,7 +402,7 @@ class Dictionary:
                                         bow[tok_id] += 1;
                                 else:
                                         bow[tok_id] = 1;
-                        
+
                 if give_bow == True:
                         return bow;
 
@@ -520,6 +520,8 @@ class Loader:
                 self.max_tokens = max_tokens;
                 self.dictionary = Dictionary();
 
+                LOG.info("Created loader");
+
 
         def add_document(self, token_list):
                 """
@@ -537,7 +539,8 @@ class Loader:
                         final computation of the DTM when calling .done().
                 """
                 self.bow_list.append(self.dictionary.grow(token_list, True));
-                print("dictionary size: "+str(len(self.dictionary)));
+
+                LOG.info("Loading document "+str(len(self.bow_list)-1)+" dictionary size: "+str(len(self.dictionary))+" tokens");
 
         def done(self):
                 """
@@ -571,6 +574,8 @@ class Loader:
                         #       <100k entries with POS tagging enabled.
                         self.dictionary.resize(self.max_tokens);
 
+                LOG.info("Loader is done.");
+
                 return (self.dictionary, self._compute_dtm());
 
         def _compute_dtm(self):
@@ -593,6 +598,7 @@ class Loader:
                         term_ids used in the bags-of-words will no longer
                         be accurate. In fact, that is a problem right now.
                 """
+                LOG.info("Loader computing DTM");
                 # 
                 # This is the standard efficient construction of a
                 # compressed sparse row (CSR, or Yale-format) matrix.
@@ -632,6 +638,7 @@ def from_list(tokenize, document_list):
                 @dictionary: corpus.Dictionary object
                 @dtm       : scipy.sparse.csr_matrix (document-term matrix)
         """
+        LOG.info("Loading corpus from list of Unicode strings");
         loader = Loader();
 
         for doc in document_list:
@@ -651,6 +658,7 @@ def from_directory(tokenize, path):
                 @dictionary: corpus.Dictionary object
                 @dtm       : scipy.sparse.csr_matrix (document-term matrix)
         """
+        LOG.info("Loading corpus from directory: "+path);
         loader = Loader();
 
         for name in os.listdir(path): 
@@ -675,12 +683,13 @@ def from_database(tokenize, path=None, query=None):
                 in a single column of results. If there is more than one
                 column, only the first will be used.
         """
+        LOG.info("Loading corpus from database: "+path);
         loader = Loader();
 
         try: 
                 conn = sqlite3.connect(path);
         except sqlite3.Error as e:
-                print "SQLITE3 error: ", e.args[0];
+                LOG.error("SQLITE3 error: ", e.args[0]);
 
         # For processing non-ASCII characters
         conn.text_factory = bytes; 

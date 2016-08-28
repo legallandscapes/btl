@@ -7,7 +7,7 @@ Build all the big matrices
 import sys
 
 # SortedDict is used for the list of high probability docs (Fix this)
-sys.path.append("lib/sorted_containers");
+sys.path.append("./lib");
 
 from sortedcontainers import SortedDict
 
@@ -15,17 +15,43 @@ import sqlite3
 import numpy    # numpy arrays used to store DTM matrix 
 import scipy    # sparse arrays etc
 
+import topicmodel
+
+###############################################################################
+# Logging  
+###############################################################################
 import logging
 
-logging.basicConfig(format="%(asctime)-15s %(message)s")
-LOG = logging.getLogger("BTL")
+# create logger
+LOG = logging.getLogger(__name__);
+LOG.setLevel(logging.INFO);
 
-import topicmodel
+# create console handler 
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+
+# create file handler 
+fh = logging.FileHandler("btl.log")
+fh.setLevel(logging.INFO)
+
+# create formatter
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# add formatter to handlers 
+ch.setFormatter(formatter)
+fh.setFormatter(formatter)
+
+# add handlers to logger
+LOG.addHandler(ch)
+LOG.addHandler(fh)
+
 
 ###############################################################################
 # Compute the similarity matrix
 ###############################################################################
 def similarity_matrix(theta=None, M_T=10, M_O=10):
+
+        LOG.info("Building similarity matrix M_T="+str(M_T)+" M_O="+str(M_O));
 
         # doc_id => M_T highest-probability topic_ids 
         DOC_TOPICS = {};
@@ -64,7 +90,7 @@ def similarity_matrix(theta=None, M_T=10, M_O=10):
                                         # of expressing the topic, then which 
                                         # should we favor? We can only choose a 
                                         # certain number. Ignore for now.
-                                        print("[WARN] Equal probabilities.");
+                                        LOG.warn("Equal probabilities.");
 
                                 if len(TOPIC_DOCS[top_id]) > M_O:
                                         # Remember, dict is sorted, so this 
@@ -143,12 +169,13 @@ def similarity_matrix(theta=None, M_T=10, M_O=10):
 # Compute the citation matrix  
 ###############################################################################
 def citation_matrix(db_path, db_query):
+        LOG.info("Building citation matrix");
 
         # Open a connection to the provided database file
         try: 
                 conn = sqlite3.connect(db_path);
         except sqlite3.Error as e:
-                print "SQLITE3 error: ", e.args[0];
+                LOG.error("SQLITE3 error: ", e.args[0]);
 
         conn.text_factory = bytes; # Process non-ASCII characters
 
@@ -178,6 +205,8 @@ def citation_matrix(db_path, db_query):
 ###############################################################################
 
 def weighted_transition_matrix(M_sim, M_cite, w_sim, w_cite, w_cited_by):
+        LOG.info("Building normalized weighted transition matrix");
+
         # The weighted sum
         T = (w_sim*M_sim) + (w_cite*M_cite) + (w_cited_by*M_cite.transpose());
 

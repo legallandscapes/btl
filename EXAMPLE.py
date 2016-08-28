@@ -11,7 +11,7 @@ import btl
 import numpy
 import scipy
 
-print("[!] Building corpus...");
+#print("[!] Building corpus...");
 
 # Create a tokenizer (you can write your own as well)
 tokenizer = corpus.Tokenizer(
@@ -24,7 +24,7 @@ tokenizer = corpus.Tokenizer(
 
 db_path = "/home/legal_landscapes/public_html/beta/usc.db";
 
-(dictionary, dtm) = corpus.from_database(tokenizer, db_path, """
+(dictionary, dtm) = corpus.from_database(tokenizer.tokenize, db_path, """
         SELECT text
         FROM nodes
 """);
@@ -32,18 +32,18 @@ db_path = "/home/legal_landscapes/public_html/beta/usc.db";
 dictionary.save("usc.dictionary");
 numpy.savez("usc.dtm", dtm);
 
-print("[!] Running LDA model...");
+#print("[!] Running LDA model...");
 (theta, phi) = topicmodel.lda(dtm, num_topics=100, num_passes=10);
 
 numpy.savez("usc.theta", theta);
 numpy.savez("usc.phi", phi);
 
-print("[!] Computing similarity matrix...");
+#print("[!] Computing similarity matrix...");
 SIM = btl.similarity_matrix(theta, M_T=10, M_O=10);
 
 numpy.savez("usc.sim", SIM);
 
-print("[!] Computing citation matrix...");
+#print("[!] Computing citation matrix...");
 CITE = btl.citation_matrix(db_path, """
         SELECT n0.rowid, n1.rowid 
         FROM edges

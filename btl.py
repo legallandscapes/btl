@@ -45,11 +45,44 @@ fh.setFormatter(formatter)
 LOG.addHandler(ch)
 LOG.addHandler(fh)
 
+###############################################################################
+# Save and load CSR matrices 
+###############################################################################
+def save_csr(path, matrix):
+        numpy.savez(path, 
+                data    = matrix.data, 
+                indices = matrix.indices,
+                indptr  = matrix.indptr,
+                shape   = matrix.shape
+        );
+
+def load_csr(path):
+        archive = numpy.load(path);
+
+        return scipy.sparse.csr_matrix(
+                (archive["data"], archive["indices"], archive["indptr"]), 
+                shape = archive["shape"]
+        );
+
 
 ###############################################################################
 # Compute the similarity matrix
 ###############################################################################
 def similarity_matrix(theta=None, M_T=10, M_O=10):
+        """
+        Compute the similarity matrix for a corpus, given 
+        the distribution of topics therein.
+
+        Arguments:
+                @theta: The document-topic distribution from LDA
+                @M_T  : The number of topics to consider
+                @M_O  : The number of other documents (opinions) to consider 
+        Return:
+                NxN sparse matrix in CSR format (see function body for
+                explanation).
+        Notes:
+                This needs to be cleaned up bigtime, it's a waste.
+        """
 
         LOG.info("Building similarity matrix M_T="+str(M_T)+" M_O="+str(M_O));
 
@@ -104,8 +137,6 @@ def similarity_matrix(theta=None, M_T=10, M_O=10):
                         if i < M_O:
                                 DOC_TOPICS[doc_id].append(top_id);
 
-                        LOG.info("1. Arrays [%d/%d][%d/%d]", doc_id, len(theta), i, len(topics));
-
         #
         # Build this matrix thing to join docs to "similar" docs
         #
@@ -119,9 +150,6 @@ def similarity_matrix(theta=None, M_T=10, M_O=10):
                         topic_id = DOC_TOPICS[doc_id][i];
 
                         MATRIX[doc_id].append(TOPIC_DOCS[topic_id].values());
-
-                        LOG.info("MATRIX [%d/%d][%d/%d]", doc_id, len(theta), i, len(DOC_TOPICS[doc_id]));
-
 
         #
         # Build dictionary to count occurrences. 
@@ -141,12 +169,10 @@ def similarity_matrix(theta=None, M_T=10, M_O=10):
                                         W[doc_id_A][doc_id_B] = 1;
                                 else:
                                         W[doc_id_A][doc_id_B] += 1;
-
-                                LOG.info("3. W [%d][%d]", doc_id_A, doc_id_B); 
-                
         #
         # Build the similarity matrix
         #
+        # FIXME: Why dok?
         T_sim = scipy.sparse.dok_matrix((len(theta), len(theta)), dtype=numpy.float);
 
         for a in W:
@@ -155,20 +181,31 @@ def similarity_matrix(theta=None, M_T=10, M_O=10):
                         if W[a][b] > 0:
                                 total += W[a][b];
                         
-                        LOG.info("4a. T_sim [%d][%d]", a, b); 
-                        
                 for b in W[a]:
                         if W[a][b] > 0:
                                 T_sim[a,b] = float(W[a][b])/total;
                 
-                        LOG.info("4b. T_sim [%d][%d]", a, b); 
-
-        return T_sim.tocsc();
+        return T_sim.tocsr();
 
 ###############################################################################
 # Compute the citation matrix  
 ###############################################################################
 def citation_matrix(db_path, db_query):
+        """
+        Compute the citation matrix for a corpus, given a
+        database query.
+
+        Arguments:
+                @db_path : Path to SQLite3 database file
+                @db_query: Query to run
+        Return:
+                NxN sparse matrix in CSR format, with M[i][j] = 1
+                if and only if document i cites document j.
+        Notes:
+                The argument @db_query when applied to the database
+                at @db_path should return a 2-column result set,
+                where ids in column 0 cite ids in column 1.
+        """
         LOG.info("Building citation matrix");
 
         # Open a connection to the provided database file
@@ -199,16 +236,36 @@ def citation_matrix(db_path, db_query):
 
         return M_cite.tocsr();
 
-
 ###############################################################################
 # Compute the weighted transition matrix 
 ###############################################################################
-
 def weighted_transition_matrix(M_sim, M_cite, w_sim, w_cite, w_cited_by):
+        """
+        Compute the weighted transition matrix given the three
+        weights for similarity, citation, and -citation.
+
+        Arguments:
+                @M_sim     : Similarity matrix
+                @M_cite    : Citation matrix
+                @w_sim     : (float) Similarity edge weight from 0-1
+                @w_cite    : (float) Citation edge weight from 0-1
+                @w_cited_by: (float) Cited-by edge weight from 0-1
+        Return:
+                Transition matrix in CSR format.
+
+        Notes:
+                M_sim, M_cite, and the returned matrix should all be
+                NxN, where N is the number of documents in the corpus.
+
+                @w_sim, @w_cite, and @w_cited_by should add up to 1. 
+        """
         LOG.info("Building normalized weighted transition matrix");
 
         # The weighted sum
         T = (w_sim*M_sim) + (w_cite*M_cite) + (w_cited_by*M_cite.transpose());
+
+        # Faster for modification
+        T = T.tolil();
 
         # Fill the diagonal with 0. 
         # Newer versions of numpy can use T = numpy.fill_diagonal(T, 0);
@@ -221,21 +278,107 @@ def weighted_transition_matrix(M_sim, M_cite, w_sim, w_cite, w_cited_by):
         # If a row sums to 0, replace this sum with 1, to prevent 
         # division by 0 in the next step. The result will still be 
         # 0 (the correct value) in the normalization.
-        row_sums[row_sums == 0] = 1;
+        row_sums[row_sums == 1] = 1;
 
         # Uses numpy broadcasting to act elementwise on @row_sums
         T = T / row_sums; 
 
-        return T;
-
+        # Back to CSR format
+        return scipy.sparse.csr_matrix(T);
 
 ###############################################################################
-# Compute the distance matrix
+# Compute the rank matrix
 ###############################################################################
+def rank_matrix(T, r):
+        """
+        Compute a rank matrix from a non-negative square matrix, sp.
+        a matrix of transition probabilities for a Markov process. 
 
-#def distance_matrix(T, r):
- 
+        Arguments:
+                @T: Transition matrix
+                @r: Stopping probability
+        Return:
+                Rank matrix
+        Notes:
+                Formally, the rank matrix R is defined
+                
+                        R = \sum_{k=0}^{\infty} r^k * T^k 
 
+                so that the value R(a,b) is the expected number of
+                steps for a random walk beginning at a to end at b.
 
+                This infinite sum is in fact the power series expansion
+                of the matrix
 
+                        Y(r,T) := (I - rT)^{-1},
+
+                where I is the identity matrix matching T.
+
+                This matrix is called the resolvent of T, and has other
+                applications as well, as well as technical constraints
+                which are satisfied in this use case, so let's not go
+                into them, hmm?
+        """
+        n = T.shape[0] if hasattr(T, "shape") else len(T);
+
+        # Get the identity matrix
+        #I = numpy.eye(n);
+        I = scipy.sparse.identity(n, format="csc");
+
+        # Obtain the resolvent
+        # Warning: This may be very unkind to other users on the system...
+        #R = numpy.linalg.solve(I - r*T, I);
+
+        R = scipy.sparse.linalg.spsolve(I - r*T, I);
+
+        return scipy.sparse.csc_matrix(R);
+
+###############################################################################
+# Compute the PageDist matrix 
+###############################################################################
+def distance_matrix(R, p=2): 
+        """
+        Compute the PageDist matrix, given the rank matrix (resolvent)
+        of the normalized weighted transition probability matrix.
+
+        Arguments:
+                @R: Rank matrix / resolvent of T
+                @p: p-norm (default=2, Euclidean norm)
+        Return:
+                PageDist matrix of size equal to R's
+        Notes:
+                We define
+                        PageDist(a,b) := ||R(a, ) - R(b, )||_p
+                                       
+                which is equal to
+                        (\sum_{x\in R} [R(a,x) - R(b,x)]^p)^{1/p},
+
+                that is, the p-norm.
+        """
+
+        # Number of rows/cols in the matrix R.
+        n = R.shape[0] if hasattr(R, "shape") else len(R);
+
+        # 1/p
+        p_inv = 1/1.0*p;
+
+        # Will be the result
+        D = None;
+
+        for i in range(n):
+                # Get the i-th row of R as a 1xn matrix
+                row = R[i,:]; 
+
+                # Make a new matrix where every row is equal to @row
+                tile_i = numpy.tile(row, [n,1]);
+
+                # Compute the p-norm for R(x,y) - R(i,z), for x,y,z in n. 
+                dist_i = numpy.sum(abs(R - tile_i)**p, axis=1) ** p_inv;
+
+                if D is None:
+                        D = dist_i;
+                else: 
+                        D = numpy.concatenate([D, dist_i]);
+
+        return D;
 

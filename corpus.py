@@ -101,7 +101,7 @@ class Tokenizer:
         
         These are, in order of application:
          
-        1.) Lexical smoothing 
+        1.) Lexical filtering 
               a. All sequences of whitespace become a single space
               b. All non-ASCII and punctuation characters are removed
               c. All letters are made lowercase
@@ -109,7 +109,7 @@ class Tokenizer:
         2.) Part-of-speech (POS) filtering 
               a. Words that are not nouns are removed
         
-        3.) Stop word removal 
+        3.) Stop word filtering 
               a. Tokens in NLTK English stop word list are removed. 
               b. Tokens in user-provided stop word list are removed.
                
@@ -129,7 +129,7 @@ class Tokenizer:
         # Instantiate an object to run Porter's stemming algorithm
         stemmer = nltk.stem.porter.PorterStemmer();
 
-        def smooth_lexical(self, string):
+        def filter_lexical(self, string):
                 """ 
                 Remove certain lexical features from the given string
 
@@ -152,7 +152,7 @@ class Tokenizer:
 
                 return string;
 
-        def smooth_part_of_speech(self, tokens):
+        def filter_part_of_speech(self, tokens):
                 """ 
                 Remove certain parts of speech from the token list
 
@@ -168,7 +168,7 @@ class Tokenizer:
 
                 return [w[0] for w in tagged if w[1][0] == "N"];
 
-        def smooth_stop_tokens(self, token_list):
+        def filter_stop_tokens(self, token_list):
                 """ 
                 Remove stop tokens from the token list.
 
@@ -182,7 +182,7 @@ class Tokenizer:
                 """
                 return [tok for tok in token_list if not tok in self.stop_tokens];
 
-        def smooth_stem_tokens(self, token_list): 
+        def filter_stem_tokens(self, token_list): 
                 """ 
                 Perform stemming on the provided token list
 
@@ -207,18 +207,18 @@ class Tokenizer:
                         Processed token list (array of strings)
                 """
                 if self.do_lex:
-                        string = self.smooth_lexical(string);
+                        string = self.filter_lexical(string);
 
                 tokens = string.split();
 
                 if self.do_pos:
-                        tokens = self.smooth_part_of_speech(tokens);
+                        tokens = self.filter_part_of_speech(tokens);
 
                 if self.do_stop:
-                        tokens = self.smooth_stop_tokens(tokens);
+                        tokens = self.filter_stop_tokens(tokens);
 
                 if self.do_stem:
-                        tokens = self.smooth_stem_tokens(tokens);
+                        tokens = self.filter_stem_tokens(tokens);
 
                 return tokens;
 

@@ -17,6 +17,9 @@ import btl
 import numpy
 import scipy
 
+"""
+Helper functions
+"""
 def save_sparse(filename, sparse):
         numpy.savez(filename, 
                 data=sparse.data, 
@@ -34,7 +37,13 @@ def load_sparse(filename):
         );
 
 
-# Create a new model 
+"""
+The example will process an entire corpus all in one run.
+You can stop the process at any point or load data from
+a file and begin at any point.
+"""
+
+# Create a new tokenizer
 tokenizer = corpus.Tokenizer(
         stop_tokens = ["l","stat","pub"],
 
@@ -43,6 +52,7 @@ tokenizer = corpus.Tokenizer(
         use_pos_tagging       = True
 );
 
+# Create a dictionary and DTM from a database 
 db_path = "/home/legal_landscapes/public_html/beta/usc.db";
 
 (dictionary, DTM) = corpus.from_database(tokenizer.tokenize, db_path, """
@@ -50,13 +60,13 @@ db_path = "/home/legal_landscapes/public_html/beta/usc.db";
         FROM nodes
 """);
 
-dictionary.save("usc.dictionary");
-numpy.save("usc.dtm", dtm);
-
+# Create the THETA and PHI matrices from the LDA topic modeler
 (THETA, PHI) = topicmodel.lda(dtm, num_topics=100, num_passes=10);
 
+# Create the similarity matrix
 SIM = btl.similarity_matrix(THETA, M_T=10, M_O=10);
 
+# Create the citation matrix
 CITE = btl.citation_matrix(db_path, """
         SELECT n0.rowid, n1.rowid 
         FROM edges
@@ -66,15 +76,17 @@ CITE = btl.citation_matrix(db_path, """
                 ON target_url = n1.url
 """);
 
+# Create the transition matrix 
 TRAN = btl.weighted_transition_matrix(SIM, CITE, 0.33, 0.33, 0.33);
 
+# Create the rank matrix 
 RANK = btl.rank_matrix(TRAN, 1/3.0);
 
+# Create the final distance matrix 
 DIST = btl.distance_matrix(RANK, 2);
 
 # Save all the model data 
 dictionary.save("usc.dictionary");
-
 save_sparse("usc.sparse.dtm", DTM);
 numpy.save("usc.theta", THETA);
 numpy.save("usc.phi", PHI);

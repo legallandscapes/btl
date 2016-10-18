@@ -324,14 +324,17 @@ def rank_matrix(T, r):
         # Get the identity matrix
         #I = numpy.eye(n);
         I = scipy.sparse.identity(n, format="csc");
+        print("[!] Done building CSC identity matrix");
 
         # Obtain the resolvent
         # Warning: This may be very unkind to other users on the system...
         #R = numpy.linalg.solve(I - r*T, I);
 
         R = scipy.sparse.linalg.spsolve(I - r*T, I);
+        print("[!] Done solving for R");
 
-        return scipy.sparse.csc_matrix(R);
+        #return scipy.sparse.csc_matrix(R);
+        return R;
 
 ###############################################################################
 # Compute the PageDist matrix 
